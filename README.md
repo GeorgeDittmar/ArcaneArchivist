@@ -1,2 +1,2 @@
-# mimic-dm
-DnD AI GM assistant for solo play or campaigns
+# Arcane Archivist
+DnD AI GM assistant for solo play or campaign management
