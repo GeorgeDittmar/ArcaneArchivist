@@ -11,3 +11,15 @@ async def root():
 @app.get("/health")
 async def root():
     return {"message": f"ArcaneArchive {VERSION} \n Status: UP"}
+
+@app.post("/v1/document/ingest")
+async def root():
+    return {"message": f"ArcaneArchive {VERSION} \n Status: UP"}
+
+@app.post("/v1/document/update")
+async def root():
+    return {"message": f"ArcaneArchive {VERSION} \n Status: UP"}
+
+@app.post("/v1/agents/invoke")
+async def root():
+    return {"message": f"ArcaneArchive {VERSION} \n Status: UP"}
