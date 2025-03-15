@@ -20,38 +20,45 @@ class AgentRouterState(MessagesState):
     input: str
     output: str
     decision: str
+    continue_conversation: bool
 
 # Creating the first analysis agent to check the prompt structure
 # This print part helps you to trace the graph decisions
 def analyze_text(state:AgentRouterState):
     llm = ChatOpenAI()
     prompt = PromptTemplate.from_template("""
-    You are an agent that needs to decide if a given text input is a note to be saved or any another task (other).
+    You are an agent that needs to classify if a given input is a piece of information to save for a DnD DM's notes, or some other task the DM needs performed.
     
-    Analyse the question and determine what the user intends with the text. 
-    Only reply "note" if the input appears to be information about something. Otherwise reply "other" for any other type of input.
+    Analyse the question and determine if the user is attempting to take a note or needing you to perform some task. 
+    Only reply "note" if the input appears to be information about something to be saved. Otherwise reply "other" for any other task the user wants.
     
     user input: {input}
                                           
     Your decision can only be "note" or "other".
-                                          
-    decision: 
     """)
 
     chain = prompt | llm
-    response = chain.invoke({"input": state["input"]},config={"configurable": {"thread_id": "1"}})
+    response = chain.invoke({"input": state["input"]})
     decision = response.content.strip().lower()
     print(decision)
-    return {"decision": decision, "messages": state["input"]}
+    return {"decision": decision}
 
 # Creating the generic agent
 def other_task(state):
     llm = ChatOpenAI()
     prompt = PromptTemplate.from_template(
-        "Perform the task thats been asked: {input}"
+        """Given the following conversation history and a current ask from the user, perform the requested action and refer to the history if needed.
+
+        Converstation history:{history}
+
+        Current user input: {input}
+
+        Again perform the requested task from the current user input and use the conversation history as needed.
+        """
     )
     chain = prompt | llm
-    response = chain.invoke({"input": [state["input"]] + state['messages']},config={"configurable": {"thread_id": "1"}})
+    response = chain.invoke({"input": [state["input"]], "history": state['messages']},config={"configurable": {"thread_id": "1"}})
+    print(response.content)
     return {"output": response, 'messages': state['input']}
 
 def lookup_info_agent(state):
@@ -67,7 +74,7 @@ def note_saver_agent(state):
         "Take the note and extract any entities that are found and return the note string with the entity between xml tags. Be sure to label the entity tag with what it is: {input}"
     )
     chain = prompt | llm
-    response = chain.invoke({"input": [state["input"]] + state['messages'], "config":{"configurable": {"thread_id": "1"}}})
+    response = chain.invoke({"input": state["input"], "config":{"configurable": {"thread_id": "1"}}})
     return {"output": response, 'messages': state['input']}
 
 # def entity_extractor_agent(state):
@@ -92,10 +99,35 @@ def process_question(state):
 def create_graph():
     workflow = StateGraph(AgentRouterState)
 
+    workflow.add_node("get_input", get_user_input)
+    # workflow.add_node("process_question", process_question)
+
+    # workflow.set_entry_point("get_input")
+
+    # workflow.add_conditional_edges(
+    # "get_input",
+    # lambda x: "continue" if x["continue_conversation"] else "end",
+    #     {
+    #         "continue": "process_question",
+    #         "end": END
+    #     }
+    # )
+
     workflow.add_node("analyze", analyze_text)
     workflow.add_node("note_agent", note_saver_agent)
     workflow.add_node("generic_agent", other_task)
 
+ 
+
+    workflow.set_entry_point("get_input")
+    workflow.add_conditional_edges(
+        "get_input",
+        lambda x: "continue" if x["continue_conversation"] else "end",
+            {
+                "continue": "analyze",
+                "end": END
+            }
+        )
     workflow.add_conditional_edges(
         "analyze",
         lambda x: x["decision"],
@@ -104,10 +136,8 @@ def create_graph():
             "other": "generic_agent"
         }
     )
-
-    workflow.set_entry_point("analyze")
-    workflow.add_edge("note_agent", END)
-    workflow.add_edge("generic_agent", END)
+    workflow.add_edge("note_agent", "get_input")
+    workflow.add_edge("generic_agent", "get_input")
     memory = MemorySaver()
     return workflow.compile(checkpointer=memory)
 
@@ -117,7 +147,7 @@ class UserInput(TypedDict):
     input: str
     continue_conversation: bool
 
-def get_user_input(state: AgentRouterState) -> UserInput:
+def get_user_input(state: AgentRouterState) -> AgentRouterState:
     user_input = input("\nEnter your question (ou 'q' to quit) : ")
     return {
         "input": [user_input] + state['messages'] ,
@@ -146,10 +176,10 @@ def create_conversation_graph():
     return workflow.compile(checkpointer=memory)
 
 def main():
-    conversation_graph = create_conversation_graph()
+    conversation_graph = create_graph()
     # starts building up the state
     conversation_graph.invoke({"input": "", "continue_conversation": True},config={"configurable": {"thread_id": "1"}})
-
+    
 if __name__ == "__main__":
     print("Start")
     main()
